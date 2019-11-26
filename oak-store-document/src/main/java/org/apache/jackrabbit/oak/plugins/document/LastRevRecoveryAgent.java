@@ -29,7 +29,9 @@ import static org.apache.jackrabbit.oak.plugins.document.util.Utils.PROPERTY_OR_
 import static org.apache.jackrabbit.oak.plugins.document.util.Utils.isCommitted;
 import static org.apache.jackrabbit.oak.plugins.document.util.Utils.resolveCommitRevision;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -403,6 +405,158 @@ public class LastRevRecoveryAgent {
         }
 
         return size;
+    }
+    
+    /**
+     * Get the list of inconsistent/incorrect _lastRev updates for the given candidate nodes.
+     *
+     * @param suspects the potential suspects
+     * @param clusterId the cluster id for which _lastRev recovery needed
+     * @return list of inconsistent paths. This method
+     *          returns paths of the affected documents even if
+     *          {@code dryRun} is set true and no document was changed.
+     */
+    public List<String> getInconsistentDocuments(final Iterable<NodeDocument> suspects,
+                       final int clusterId)
+            throws DocumentStoreException {
+        final DocumentStore docStore = nodeStore.getDocumentStore();
+        NodeDocument rootDoc = Utils.getRootDocument(docStore);
+
+        // first run a sweep
+        final AtomicReference<Revision> sweepRev = new AtomicReference<>();
+        if (rootDoc.getSweepRevisions().getRevision(clusterId) != null) {
+            // only run a sweep for a cluster node that already has a
+            // sweep revision. Initial sweep is not the responsibility
+            // of the recovery agent.
+            final RevisionContext context = new InactiveRevisionContext(
+                    rootDoc, nodeStore, clusterId);
+            final NodeDocumentSweeper sweeper = new NodeDocumentSweeper(context, true);
+            sweeper.sweep(suspects, new NodeDocumentSweepListener() {
+                @Override
+                public void sweepUpdate(Map<String, UpdateOp> updates)
+                        throws DocumentStoreException {
+                    log.info("Dry run of sweeper identified [{}] documents for " +
+                                    "cluster node [{}]: {}", updates.size(), clusterId,
+                            updates.values());
+                }
+            });
+        }
+
+     // now deal with missing _lastRev updates
+        UnsavedModifications unsaved = new UnsavedModifications();
+        UnsavedModifications unsavedParents = new UnsavedModifications();
+
+        //Map of known last rev of checked paths
+        Map<String, Revision> knownLastRevOrModification = MapFactory.getInstance().create();
+        final JournalEntry changes = JOURNAL.newDocument(docStore);
+
+        Clock clock = nodeStore.getClock();
+
+        long totalCount = 0;
+        long lastCount = 0;
+        long startOfScan = clock.getTime();
+        long lastLog = startOfScan;
+
+        for (NodeDocument doc : suspects) {
+            totalCount++;
+            lastCount++;
+
+            long now = clock.getTime();
+            long lastElapsed = now - lastLog;
+            if (lastElapsed >= LOGINTERVALMS) {
+                TimeDurationFormatter df = TimeDurationFormatter.forLogging();
+
+                long totalElapsed = now - startOfScan;
+                long totalRateMin = (totalCount * TimeUnit.MINUTES.toMillis(1)) / totalElapsed;
+                long lastRateMin = (lastCount * TimeUnit.MINUTES.toMillis(1)) / lastElapsed;
+
+                String message = String.format(
+                        "Recovery for cluster node [%d]: %d nodes scanned in %s (~%d/m) - last interval %d nodes in %s (~%d/m)",
+                        clusterId, totalCount, df.format(totalElapsed, TimeUnit.MILLISECONDS), totalRateMin, lastCount,
+                        df.format(lastElapsed, TimeUnit.MILLISECONDS), lastRateMin);
+
+                log.info(message);
+                lastLog = now;
+                lastCount = 0;
+            }
+
+            Revision currentLastRev = doc.getLastRev().get(clusterId);
+
+            // 1. determine last committed modification on document
+            Revision lastModifiedRev = determineLastModification(doc, clusterId);
+
+            Revision lastRevForParents = Utils.max(lastModifiedRev, currentLastRev);
+            // remember the higher of the two revisions. this is the
+            // most recent revision currently obtained from either a
+            // _lastRev entry or an explicit modification on the document
+            if (lastRevForParents != null) {
+                knownLastRevOrModification.put(doc.getPath(), lastRevForParents);
+            }
+
+            //If both currentLastRev and lostLastRev are null it means
+            //that no change is done by suspect cluster on this document
+            //so nothing needs to be updated. Probably it was only changed by
+            //other cluster nodes. If this node is parent of any child node which
+            //has been modified by cluster then that node roll up would
+            //add this node path to unsaved
+
+            //2. Update lastRev for parent paths aka rollup
+            if (lastRevForParents != null) {
+                String path = doc.getPath();
+                changes.modified(path); // track all changes
+                while (true) {
+                    if (PathUtils.denotesRoot(path)) {
+                        break;
+                    }
+                    path = PathUtils.getParentPath(path);
+                    unsavedParents.put(path, lastRevForParents);
+                }
+            }
+        }
+
+        for (String parentPath : unsavedParents.getPaths()) {
+            Revision calcLastRev = unsavedParents.get(parentPath);
+            Revision knownLastRev = knownLastRevOrModification.get(parentPath);
+            if (knownLastRev == null) {
+                // we don't know when the document was last modified with
+                // the given clusterId. need to read from store
+                String id = Utils.getIdFromPath(parentPath);
+                NodeDocument doc = docStore.find(NODES, id);
+                if (doc != null) {
+                    Revision lastRev = doc.getLastRev().get(clusterId);
+                    Revision lastMod = determineLastModification(doc, clusterId);
+                    knownLastRev = Utils.max(lastRev, lastMod);
+                } else {
+//                    log.warn("Unable to find document: {}", id);
+                    continue;
+                }
+            }
+
+            //Copy the calcLastRev of parent only if they have changed
+            //In many case it might happen that parent have consistent lastRev
+            //This check ensures that unnecessary updates are not made
+            if (knownLastRev == null
+                    || calcLastRev.compareRevisionTime(knownLastRev) > 0) {
+                unsaved.put(parentPath, calcLastRev);
+            }
+        }
+
+        if (sweepRev.get() != null) {
+            unsaved.put(ROOT_PATH, sweepRev.get());
+        }
+
+        //Note the size before persist as persist operation
+        //would empty the internal state
+        int size = unsaved.getPaths().size();
+        String updates = unsaved.toString();
+
+        log.info("Dry run of lastRev recovery identified [{}] documents for " +
+                "cluster node [{}]: {}", size, clusterId, updates);
+        List<String> inconsistentPaths = new ArrayList<String>();
+        for(String path : unsaved.getPaths()) {
+        	inconsistentPaths.add(path);
+        }
+        return inconsistentPaths;
     }
 
     /**

@@ -48,6 +48,7 @@ public final class AvailableModes {
             .put("rdbddldump", new RDBDDLDumpCommand())
             .put("revisions", new RevisionsCommand())
             .put("recovery", new RecoveryCommand())
+            .put("fetch", new FetchCommand())
             .put("repair", new RepairCommand())
             .put("resetclusterid", new ResetClusterIdCommand())
             .put("restore", new RestoreCommand())
