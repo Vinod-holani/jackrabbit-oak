@@ -424,23 +424,6 @@ public class LastRevRecoveryAgent {
 
         // first run a sweep
         final AtomicReference<Revision> sweepRev = new AtomicReference<>();
-        if (rootDoc.getSweepRevisions().getRevision(clusterId) != null) {
-            // only run a sweep for a cluster node that already has a
-            // sweep revision. Initial sweep is not the responsibility
-            // of the recovery agent.
-            final RevisionContext context = new InactiveRevisionContext(
-                    rootDoc, nodeStore, clusterId);
-            final NodeDocumentSweeper sweeper = new NodeDocumentSweeper(context, true);
-            sweeper.sweep(suspects, new NodeDocumentSweepListener() {
-                @Override
-                public void sweepUpdate(Map<String, UpdateOp> updates)
-                        throws DocumentStoreException {
-                    log.info("Dry run of sweeper identified [{}] documents for " +
-                                    "cluster node [{}]: {}", updates.size(), clusterId,
-                            updates.values());
-                }
-            });
-        }
 
      // now deal with missing _lastRev updates
         UnsavedModifications unsaved = new UnsavedModifications();
