@@ -276,10 +276,10 @@ public class RepositorySidegrade {
     public void copy() throws RepositoryException {
         try {
             if (!onlyVerify) {
-                if (VersionHistoryUtil.getVersionStorage(target.getRoot()).exists() && !versionCopyConfiguration.skipOrphanedVersionsCopy()) {
-                    LOG.warn("The version storage on destination already exists. Orphaned version histories will be skipped.");
-                    versionCopyConfiguration.setCopyOrphanedVersions(null);
-                }
+//                if (VersionHistoryUtil.getVersionStorage(target.getRoot()).exists() && !versionCopyConfiguration.skipOrphanedVersionsCopy()) {
+//                    LOG.warn("The version storage on destination already exists. Orphaned version histories will be skipped.");
+//                    versionCopyConfiguration.setCopyOrphanedVersions(null);
+//                }
                 copyState();
             }
             if (verify || onlyVerify) {
