@@ -124,7 +124,7 @@ class FetchCommand implements Command {
             System.out.println("Inconsistent paths are as follows");
             
             String csvFileDir = System.getProperty("user.dir");
-            String fileName = csvFileDir+File.separator+"test.csv";
+            String fileName = csvFileDir+File.separator+"outputForClusterId-"+builder.getClusterId()+".csv";
             try {
     			BufferedWriter outputWriter = new BufferedWriter(new FileWriter(fileName));
     			for(String path : inconsistentPaths) {
