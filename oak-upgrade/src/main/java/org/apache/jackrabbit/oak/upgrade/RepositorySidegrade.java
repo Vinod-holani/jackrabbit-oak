@@ -416,7 +416,7 @@ public class RepositorySidegrade {
         NodeState sourceRoot = wrapNodeState(source.getRoot(), true, false);
         NodeBuilder targetRoot = target.getRoot().builder();
         copyWorkspace(sourceRoot, targetRoot);
-        if (!versionCopyConfiguration.isCopyAll()) {
+//        if (!versionCopyConfiguration.isCopyAll()) {
             NodeBuilder versionStorage = VersionHistoryUtil.getVersionStorage(targetRoot);
             if (!versionStorage.exists()) { // it's possible that this is a new repository and the version storage
                 // hasn't been created/copied yet
@@ -426,7 +426,7 @@ public class RepositorySidegrade {
                 copyVersionStorage(targetRoot, getVersionStorage(sourceRoot), versionStorage, versionCopyConfiguration);
             }
             hooks.add(new EditorHook(new VersionableEditor.Provider(sourceRoot, workspaceName, versionCopyConfiguration)));
-        }
+//        }
 
         SecurityProvider security = new SecurityProviderImpl();
         for (SecurityConfiguration securityConfig : security.getConfigurations()) {
@@ -461,9 +461,9 @@ public class RepositorySidegrade {
         final Set<String> includes = calculateEffectiveIncludePaths(includePaths, sourceRoot);
         ImmutableSet.Builder<String> excludes = new ImmutableSet.Builder<>();
         excludes.addAll(excludePaths);
-        if (!versionCopyConfiguration.isCopyAll()) {
+//        if (!versionCopyConfiguration.isCopyAll()) {
             excludes.add("/jcr:system/jcr:versionStorage");
-        }
+//        }
         excludes.add("/:async");
 
         final Set<String> merges = union(copyOf(this.mergePaths), of("/jcr:system"));
