@@ -462,6 +462,10 @@ public class LastRevRecoveryAgent {
                 lastLog = now;
                 lastCount = 0;
             }
+            
+            if(!doc.getPath().startsWith(PathUtils.ROOT_PATH)) {
+            	continue;
+            }
 
             Revision currentLastRev = doc.getLastRev().get(clusterId);
 
@@ -486,6 +490,7 @@ public class LastRevRecoveryAgent {
             //2. Update lastRev for parent paths aka rollup
             if (lastRevForParents != null) {
                 String path = doc.getPath();
+                log.info("#############Process lastRevForParents for path = "+path);
                 changes.modified(path); // track all changes
                 while (true) {
                     if (PathUtils.denotesRoot(path)) {
